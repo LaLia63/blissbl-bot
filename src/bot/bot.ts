@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard, type Context } from "grammy";
+import { Bot, InlineKeyboard, InputFile, type Context } from "grammy";
 
 import { getConfig } from "@/lib/config";
 import { escapeHtml, formatMmk, statusLabels } from "@/lib/format";
@@ -98,11 +98,11 @@ async function showCategories(ctx: Context): Promise<void> {
   if (error) throw error;
   const keyboard = new InlineKeyboard();
   for (const [index, category] of ((data ?? []) as Array<{ id: string; name: string; emoji: string }>).entries()) {
-    keyboard.text(`${category.emoji} ${category.name}`, `cat:${category.id}:0`);
+    keyboard.text(category.name, `cat:${category.id}:0`);
     if (index % 2 === 1) keyboard.row();
   }
-  keyboard.row().text("🛒 My Cart", "cart").text("← Main menu", "main_menu");
-  await ctx.reply("✨ <b>Choose a collection</b>\nPick a category to see what is available today.", {
+  keyboard.row().text("My Cart", "cart").text("Main menu", "main_menu");
+  await ctx.reply("<b>Choose a collection</b>\nPick a category to see what is available today.", {
     parse_mode: "HTML",
     reply_markup: keyboard,
   });
@@ -130,7 +130,7 @@ async function showProducts(ctx: Context, categoryId: string, page: number): Pro
     return;
   }
 
-  await ctx.reply(`${categoryInfo.emoji} <b>${escapeHtml(categoryInfo.name)}</b>`, { parse_mode: "HTML" });
+  await ctx.reply(`<b>${escapeHtml(categoryInfo.name)}</b>`, { parse_mode: "HTML" });
   for (const product of products) {
     const keyboard = new InlineKeyboard().text("View details", `product:${product.id}`);
     const caption = `<b>${escapeHtml(product.name)}</b>\n${formatMmk(product.price_mmk)}`;
@@ -144,10 +144,10 @@ async function showProducts(ctx: Context, categoryId: string, page: number): Pro
 
   const totalPages = Math.max(1, Math.ceil((count ?? products.length) / pageSize));
   const nav = new InlineKeyboard();
-  if (page > 0) nav.text("← Previous", `cat:${categoryId}:${page - 1}`);
+  if (page > 0) nav.text("Previous", `cat:${categoryId}:${page - 1}`);
   nav.text(`${page + 1} / ${totalPages}`, "noop");
-  if (page + 1 < totalPages) nav.text("Next →", `cat:${categoryId}:${page + 1}`);
-  nav.row().text("Collections", "shop").text("🛒 Cart", "cart");
+  if (page + 1 < totalPages) nav.text("Next", `cat:${categoryId}:${page + 1}`);
+  nav.row().text("Collections", "shop").text("Cart", "cart");
   await ctx.reply("Browse more", { reply_markup: nav });
 }
 
@@ -161,9 +161,9 @@ async function showProduct(ctx: Context, productId: string): Promise<void> {
   const product = data as ProductRow;
   const available = product.is_available && (product.stock_quantity === null || product.stock_quantity > 0);
   const keyboard = new InlineKeyboard();
-  if (available) keyboard.text("＋ Add to cart", `add:${product.id}`).row();
-  keyboard.text("🛍 Keep shopping", "shop").text("🛒 My Cart", "cart");
-  const stock = available ? "✅ Available" : "⏳ Currently unavailable";
+  if (available) keyboard.text("Add to cart", `add:${product.id}`).row();
+  keyboard.text("Keep shopping", "shop").text("My Cart", "cart");
+  const stock = available ? "Available" : "Currently unavailable";
   const caption = [
     `<b>${escapeHtml(product.name)}</b>`,
     `<b>${formatMmk(product.price_mmk)}</b>`,
@@ -192,25 +192,31 @@ async function showCart(ctx: Context): Promise<void> {
     products: { id: string; name: string; price_mmk: number; is_available: boolean; stock_quantity: number | null };
   }>;
   if (items.length === 0) {
-    await ctx.reply("🛒 <b>Your cart is empty.</b>\nLet’s find something lovely.", {
+    await ctx.reply("<b>Your cart is empty.</b>\nLet’s find something lovely.", {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard().text("Browse shop", "shop").text("← Menu", "main_menu"),
+      reply_markup: new InlineKeyboard().text("Browse shop", "shop").text("Menu", "main_menu"),
     });
     return;
   }
   const total = items.reduce((sum, item) => sum + item.products.price_mmk * item.quantity, 0);
-  const lines = items.map((item, i) => `${i + 1}. <b>${escapeHtml(item.products.name)}</b> × ${item.quantity}\n   ${formatMmk(item.products.price_mmk * item.quantity)}`);
+  const hasUnavailable = items.some((item) => !item.products.is_available || (item.products.stock_quantity !== null && item.products.stock_quantity < item.quantity));
+  const lines = items.map((item, i) => {
+    const unavailable = !item.products.is_available || (item.products.stock_quantity !== null && item.products.stock_quantity < item.quantity);
+    return `${i + 1}. <b>${escapeHtml(item.products.name)}</b> x ${item.quantity}\n   ${formatMmk(item.products.price_mmk * item.quantity)}${unavailable ? "\n   Currently unavailable - remove this item to continue" : ""}`;
+  });
   const keyboard = new InlineKeyboard();
   for (const item of items) {
     keyboard
-      .text("−", `qty:-:${item.products.id}`)
+      .text("-", `qty:-:${item.products.id}`)
       .text(`${item.quantity}`, "noop")
-      .text("＋", `qty:+:${item.products.id}`)
+      .text("+", `qty:+:${item.products.id}`)
       .text("Remove", `remove:${item.products.id}`)
       .row();
   }
-  keyboard.text("🧹 Clear", "clear_cart").text("🛍 Continue shopping", "shop").row().text("Checkout →", "checkout");
-  await ctx.reply(`🛒 <b>My Cart</b>\n\n${lines.join("\n\n")}\n\n<b>Subtotal: ${formatMmk(total)}</b>`, {
+  keyboard.text("Clear cart", "clear_cart").text("Continue shopping", "shop").row();
+  if (!hasUnavailable) keyboard.text("Checkout", "checkout");
+  const checkoutHint = hasUnavailable ? "\n\nRemove unavailable items before checkout." : "\n\nUse - / + to change quantity, or Remove to delete an item.";
+  await ctx.reply(`<b>My Cart</b>\n\n${lines.join("\n\n")}\n\n<b>Subtotal: ${formatMmk(total)}</b>${checkoutHint}`, {
     parse_mode: "HTML",
     reply_markup: keyboard,
   });
@@ -230,8 +236,13 @@ async function showOrders(ctx: Context): Promise<void> {
     await ctx.reply("You have no orders yet. Your first favourite is waiting in the shop.", { reply_markup: backToMenu() });
     return;
   }
-  const text = orders.map((order) => `• <b>${order.order_number}</b> — ${formatMmk(order.total_mmk)}\n  ${statusLabels[order.status] ?? order.status}`).join("\n\n");
-  await ctx.reply(`📦 <b>My Orders</b>\n\n${text}`, { parse_mode: "HTML", reply_markup: backToMenu() });
+  const text = orders.map((order) => `<b>${order.order_number}</b> - ${formatMmk(order.total_mmk)}\n${statusLabels[order.status] ?? order.status}`).join("\n\n");
+  const keyboard = new InlineKeyboard();
+  for (const order of orders) {
+    if (order.status === "PAYMENT_DECLINED") keyboard.text(`Resubmit ${order.order_number}`, `resubmit:${order.id}`).row();
+  }
+  keyboard.text("Main menu", "main_menu");
+  await ctx.reply(`<b>My Orders</b>\n\n${text}`, { parse_mode: "HTML", reply_markup: keyboard });
 }
 
 async function showAdmin(ctx: Context): Promise<void> {
@@ -246,16 +257,98 @@ async function showAdmin(ctx: Context): Promise<void> {
     db.from("blissbl_customers").select("id", { head: true, count: "exact" }),
   ]);
   const keyboard = new InlineKeyboard()
-    .text("💳 Pending payments", "admin:payments")
+    .text("Pending payments", "admin:payments")
     .row()
-    .text("📦 Recent orders", "admin:orders")
-    .text("📊 Report", "admin:report")
+    .text("Recent orders", "admin:orders")
+    .text("Report", "admin:report")
     .row()
-    .text("← Customer menu", "main_menu");
+    .text("Customers", "admin:customers")
+    .text("Inventory", "admin:products")
+    .row()
+    .text("Addresses", "admin:addresses")
+    .text("Export CSV", "admin:export")
+    .row()
+    .text("Settings", "admin:settings")
+    .row()
+    .text("Customer menu", "main_menu");
   await ctx.reply(
-    `🔐 <b>BLISSBL Admin</b>\n\nPending payments: <b>${pendingPayments ?? 0}</b>\nActive orders: <b>${activeOrders ?? 0}</b>\nCustomers: <b>${customers ?? 0}</b>`,
+    `<b>BLISSBL Admin</b>\n\nPending payments: <b>${pendingPayments ?? 0}</b>\nActive orders: <b>${activeOrders ?? 0}</b>\nCustomers: <b>${customers ?? 0}</b>\n\nUse the buttons below to review payments, orders, and shop totals.`,
     { parse_mode: "HTML", reply_markup: keyboard },
   );
+}
+
+async function showAdminCustomers(ctx: Context): Promise<void> {
+  if (!ctx.from || !(await isAdmin(ctx.from.id))) return;
+  const { data, error } = await getSupabase()
+    .from("blissbl_customers")
+    .select("telegram_user_id,telegram_username,full_name,phone,created_at")
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  const customers = (data ?? []) as Array<{ telegram_user_id: number; telegram_username: string | null; full_name: string | null; phone: string | null }>;
+  const lines = customers.map((customer, index) => {
+    const name = customer.full_name || customer.telegram_username || "Unnamed customer";
+    return `${index + 1}. <b>${escapeHtml(name)}</b>\nTelegram ID: <code>${customer.telegram_user_id}</code>\nPhone: ${escapeHtml(customer.phone || "Not provided")}`;
+  });
+  await ctx.reply(`<b>Customers</b>\n\n${lines.join("\n\n") || "No customers yet."}`, {
+    parse_mode: "HTML",
+    reply_markup: new InlineKeyboard().text("Admin", "admin:home"),
+  });
+}
+
+async function showAdminProducts(ctx: Context): Promise<void> {
+  if (!ctx.from || !(await isAdmin(ctx.from.id))) return;
+  const { data, error } = await getSupabase()
+    .from("blissbl_products")
+    .select("name,sku,price_mmk,stock_quantity,is_available")
+    .order("name")
+    .limit(50);
+  if (error) throw error;
+  const products = (data ?? []) as Array<{ name: string; sku: string | null; price_mmk: number; stock_quantity: number | null; is_available: boolean }>;
+  const lines = products.map((product) => `${product.is_available ? "Available" : "Hidden"} | <b>${escapeHtml(product.name)}</b>\n${product.sku ? `SKU: ${escapeHtml(product.sku)} | ` : ""}${formatMmk(product.price_mmk)} | Stock: ${product.stock_quantity ?? "Unlimited"}`);
+  await ctx.reply(`<b>Inventory</b>\n\n${lines.join("\n\n") || "No products yet."}`, {
+    parse_mode: "HTML",
+    reply_markup: new InlineKeyboard().text("Admin", "admin:home"),
+  });
+}
+
+async function showAdminAddresses(ctx: Context): Promise<void> {
+  if (!ctx.from || !(await isAdmin(ctx.from.id))) return;
+  const { data, error } = await getSupabase()
+    .from("blissbl_delivery_addresses")
+    .select("recipient_name,phone,address_line,township,city,customers:blissbl_customers(full_name,telegram_username)")
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  const addresses = (data ?? []) as unknown as Array<{ recipient_name: string; phone: string; address_line: string; township: string; city: string; customers: { full_name: string | null; telegram_username: string | null } }>;
+  const lines = addresses.map((address, index) => `${index + 1}. <b>${escapeHtml(address.recipient_name)}</b> - ${escapeHtml(address.city)}\nCustomer: ${escapeHtml(address.customers?.full_name || address.customers?.telegram_username || "Unknown")}\nPhone: ${escapeHtml(address.phone)}\n${escapeHtml(address.address_line)}, ${escapeHtml(address.township)}`);
+  await ctx.reply(`<b>Delivery addresses</b>\n\n${lines.join("\n\n") || "No saved addresses yet."}`, {
+    parse_mode: "HTML",
+    reply_markup: new InlineKeyboard().text("Admin", "admin:home"),
+  });
+}
+
+async function exportAdminOrders(ctx: Context): Promise<void> {
+  if (!ctx.from || !(await isAdmin(ctx.from.id))) return;
+  const { data, error } = await getSupabase()
+    .from("blissbl_orders")
+    .select("order_number,total_mmk,status,placed_at,customers:blissbl_customers(full_name,telegram_username)")
+    .order("placed_at", { ascending: false });
+  if (error) throw error;
+  const rows = (data ?? []) as unknown as Array<{ order_number: string; total_mmk: number; status: string; placed_at: string; customers: { full_name: string | null; telegram_username: string | null } }>;
+  const csvEscape = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`;
+  const csv = ["Order,Customer,Amount MMK,Status,Placed at", ...rows.map((row) => [row.order_number, row.customers?.full_name || row.customers?.telegram_username || "", row.total_mmk, row.status, row.placed_at].map(csvEscape).join(","))].join("\n");
+  await ctx.replyWithDocument(new InputFile(Buffer.from(csv, "utf8"), "blissbl-orders.csv"), { caption: "Your BLISSBL orders export is ready." });
+}
+
+async function showAdminSettings(ctx: Context): Promise<void> {
+  if (!ctx.from || !(await isAdmin(ctx.from.id))) return;
+  const { data } = await getSupabase().from("blissbl_app_settings").select("delivery_fee_mmk,kpay_qr_path,support_text").eq("id", true).maybeSingle();
+  const settings = data as { delivery_fee_mmk?: number; kpay_qr_path?: string; support_text?: string } | null;
+  await ctx.reply(`<b>Shop settings</b>\n\nDelivery fee: ${formatMmk(settings?.delivery_fee_mmk ?? 0)}\nKPay QR: ${escapeHtml(settings?.kpay_qr_path || "Not configured")}\nSupport: ${escapeHtml(settings?.support_text || "Not configured")}\n\nTo update settings, edit the values in Supabase and use this menu to verify them.`, {
+    parse_mode: "HTML",
+    reply_markup: new InlineKeyboard().text("Admin", "admin:home"),
+  });
 }
 
 async function showPendingPayments(ctx: Context): Promise<void> {
@@ -274,16 +367,16 @@ async function showPendingPayments(ctx: Context): Promise<void> {
     orders: { order_number: string; customers: { full_name: string | null; telegram_username: string | null } };
   }>;
   if (payments.length === 0) {
-    await ctx.reply("✅ No pending payments.", { reply_markup: new InlineKeyboard().text("← Admin", "admin:home") });
+    await ctx.reply("No pending payments.", { reply_markup: new InlineKeyboard().text("Admin", "admin:home") });
     return;
   }
   for (const payment of payments) {
     const { data: signed } = await getSupabase().storage.from("blissbl-payment-slips").createSignedUrl(payment.slip_object_path, 120);
     const keyboard = new InlineKeyboard()
-      .text("✅ Approve", `pay:approve:${payment.id}`)
+      .text("Approve", `pay:approve:${payment.id}`)
       .text("Decline", `pay:decline:${payment.id}`);
     const customerName = payment.orders.customers.full_name || payment.orders.customers.telegram_username || "Customer";
-    const caption = `💳 <b>New payment</b>\nOrder: <b>${escapeHtml(payment.orders.order_number)}</b>\nCustomer: ${escapeHtml(customerName)}\nAmount: <b>${formatMmk(payment.amount_mmk)}</b>`;
+    const caption = `<b>New payment</b>\nOrder: <b>${escapeHtml(payment.orders.order_number)}</b>\nCustomer: ${escapeHtml(customerName)}\nAmount: <b>${formatMmk(payment.amount_mmk)}</b>`;
     if (signed?.signedUrl) await ctx.replyWithPhoto(signed.signedUrl, { caption, parse_mode: "HTML", reply_markup: keyboard });
     else await ctx.reply(caption, { parse_mode: "HTML", reply_markup: keyboard });
   }
@@ -292,18 +385,18 @@ async function showPendingPayments(ctx: Context): Promise<void> {
 async function processDeliveryText(ctx: Context, session: SessionRow, text: string): Promise<boolean> {
   if (!ctx.from) return false;
   const steps: Record<string, { key: string; next: string; prompt: string }> = {
-    CHECKOUT_FULL_NAME: { key: "full_name", next: "CHECKOUT_PHONE", prompt: "📱 Your phone number?" },
-    CHECKOUT_PHONE: { key: "phone", next: "CHECKOUT_RECIPIENT", prompt: "📦 Recipient name?" },
-    CHECKOUT_RECIPIENT: { key: "recipient_name", next: "CHECKOUT_RECIPIENT_PHONE", prompt: "☎️ Recipient phone number?" },
-    CHECKOUT_RECIPIENT_PHONE: { key: "recipient_phone", next: "CHECKOUT_ADDRESS", prompt: "🏠 Full delivery address?" },
-    CHECKOUT_ADDRESS: { key: "address_line", next: "CHECKOUT_TOWNSHIP", prompt: "📍 Township?" },
-    CHECKOUT_TOWNSHIP: { key: "township", next: "CHECKOUT_CITY", prompt: "🌆 City?" },
-    CHECKOUT_CITY: { key: "city", next: "CHECKOUT_NOTE", prompt: "📝 Any delivery note? Send “-” if none." },
+    CHECKOUT_FULL_NAME: { key: "full_name", next: "CHECKOUT_PHONE", prompt: "Step 2 of 7: What phone number should we use?" },
+    CHECKOUT_PHONE: { key: "phone", next: "CHECKOUT_RECIPIENT", prompt: "Step 3 of 7: Who should receive the package?" },
+    CHECKOUT_RECIPIENT: { key: "recipient_name", next: "CHECKOUT_RECIPIENT_PHONE", prompt: "Step 4 of 7: Recipient phone number?" },
+    CHECKOUT_RECIPIENT_PHONE: { key: "recipient_phone", next: "CHECKOUT_ADDRESS", prompt: "Step 5 of 7: Full delivery address?" },
+    CHECKOUT_ADDRESS: { key: "address_line", next: "CHECKOUT_TOWNSHIP", prompt: "Step 6 of 7: Township?" },
+    CHECKOUT_TOWNSHIP: { key: "township", next: "CHECKOUT_CITY", prompt: "Step 7 of 7: City?" },
+    CHECKOUT_CITY: { key: "city", next: "CHECKOUT_NOTE", prompt: "Any delivery note? Send '-' if none." },
   };
   const step = steps[session.state];
   if (!step) return false;
   if (text.trim().length < 2 || text.trim().length > 500) {
-    await ctx.reply("Please enter a valid value (2–500 characters).");
+    await ctx.reply("Please enter a valid value between 2 and 500 characters.");
     return true;
   }
   const nextContext = { ...session.context, [step.key]: text.trim() };
@@ -317,10 +410,10 @@ async function finishDelivery(ctx: Context, session: SessionRow, note: string): 
   const delivery = { ...session.context, delivery_note: note === "-" ? "" : note.trim() } as Record<string, string>;
   await setSession(ctx.from.id, "CONFIRM_ORDER", delivery);
   await ctx.reply(
-    `🧾 <b>Confirm delivery</b>\n\nRecipient: ${escapeHtml(delivery.recipient_name)}\nPhone: ${escapeHtml(delivery.recipient_phone)}\nAddress: ${escapeHtml(delivery.address_line)}, ${escapeHtml(delivery.township)}, ${escapeHtml(delivery.city)}\nNote: ${escapeHtml(delivery.delivery_note || "—")}`,
+    `<b>Confirm delivery</b>\n\nRecipient: ${escapeHtml(delivery.recipient_name)}\nPhone: ${escapeHtml(delivery.recipient_phone)}\nAddress: ${escapeHtml(delivery.address_line)}, ${escapeHtml(delivery.township)}, ${escapeHtml(delivery.city)}\nNote: ${escapeHtml(delivery.delivery_note || "None")}`,
     {
       parse_mode: "HTML",
-      reply_markup: new InlineKeyboard().text("✅ Confirm order", "confirm_order").row().text("Cancel", "cart"),
+      reply_markup: new InlineKeyboard().text("Confirm order", "confirm_order").row().text("Cancel", "cart"),
     },
   );
 }
@@ -380,12 +473,12 @@ async function handlePaymentSlip(ctx: Context, session: SessionRow): Promise<boo
     db.from("blissbl_order_status_events").insert({ order_id: orderId, from_status: (order as { status: string }).status, to_status: "PAYMENT_REVIEW", actor_kind: "CUSTOMER", actor_telegram_user_id: ctx.from.id, note: "Payment slip uploaded" }),
   ]);
   await setSession(ctx.from.id, "IDLE");
-  await ctx.reply(`💗 <b>Payment slip received!</b>\nOrder: <b>${escapeHtml((order as { order_number: string }).order_number)}</b>\nWe’ll notify you after the admin review.`, { parse_mode: "HTML", reply_markup: mainMenu() });
+  await ctx.reply(`<b>Payment slip received!</b>\nOrder: <b>${escapeHtml((order as { order_number: string }).order_number)}</b>\nWe will notify you after the admin review.`, { parse_mode: "HTML", reply_markup: mainMenu() });
   const { data: signed } = await db.storage.from("blissbl-payment-slips").createSignedUrl(path, 300);
-  const keyboard = new InlineKeyboard().text("✅ Approve", `pay:approve:${(payment.data as { id: string }).id}`).text("Decline", `pay:decline:${(payment.data as { id: string }).id}`);
+  const keyboard = new InlineKeyboard().text("Approve", `pay:approve:${(payment.data as { id: string }).id}`).text("Decline", `pay:decline:${(payment.data as { id: string }).id}`);
   if (signed?.signedUrl) {
     await ctx.api.sendPhoto(getConfig().TELEGRAM_ADMIN_USER_ID, signed.signedUrl, {
-      caption: `💳 New payment\nOrder: ${(order as { order_number: string }).order_number}\nAmount: ${formatMmk((order as { total_mmk: number }).total_mmk)}`,
+      caption: `New payment\nOrder: ${(order as { order_number: string }).order_number}\nAmount: ${formatMmk((order as { total_mmk: number }).total_mmk)}`,
       reply_markup: keyboard,
     });
   }
@@ -402,10 +495,10 @@ export function getBot(): Bot {
     await setSession(ctx.from.id, "IDLE");
     const welcomeUrl = `${getConfig().APP_URL}/assets/welcome.jpg`;
     await ctx.replyWithPhoto(welcomeUrl, {
-      caption: "💗 <b>BLISSBL မှ ကြိုဆိုပါတယ်!</b>\n\nBL merchandise တွေကို Telegram ကနေ လွယ်လွယ်ကူကူ order မှာယူနိုင်ပါတယ်။",
+      caption: "<b>Welcome to BLISSBL!</b>\n\nBrowse BL merchandise, add your favourites to the cart, and place your order in this chat.",
       parse_mode: "HTML",
     });
-    await showMainMenu(ctx, "Shop, cart နဲ့ order status ကို အောက်က menu မှ ရွေးချယ်နိုင်ပါတယ်။");
+    await showMainMenu(ctx, "Choose Shop to browse, My Cart to review your items, or My Orders to track a purchase.");
   });
 
   bot.command("admin", showAdmin);
@@ -418,6 +511,7 @@ export function getBot(): Bot {
   });
   bot.callbackQuery(/^product:([^:]+)$/, async (ctx) => { await ctx.answerCallbackQuery(); await showProduct(ctx, ctx.match[1]); });
   bot.callbackQuery(/^add:([^:]+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery({ text: "Added to your cart" });
     const customer = await ensureCustomer(ctx);
     const cartId = await getOrCreateCart(customer.id);
     const productId = ctx.match[1];
@@ -425,7 +519,9 @@ export function getBot(): Bot {
     const quantity = Math.min(99, Number((existing as { quantity?: number } | null)?.quantity ?? 0) + 1);
     const { error } = await getSupabase().from("blissbl_cart_items").upsert({ cart_id: cartId, product_id: productId, quantity }, { onConflict: "cart_id,product_id" });
     if (error) throw error;
-    await ctx.answerCallbackQuery({ text: "Added to your cart 💗" });
+    await ctx.reply("Added to your cart. What would you like to do next?", {
+      reply_markup: new InlineKeyboard().text("View my cart", "cart").text("Keep shopping", "shop"),
+    });
   });
   bot.callbackQuery("cart", async (ctx) => { await ctx.answerCallbackQuery(); await showCart(ctx); });
   bot.callbackQuery(/^qty:([+-]):([^:]+)$/, async (ctx) => {
@@ -447,6 +543,12 @@ export function getBot(): Bot {
     await showCart(ctx);
   });
   bot.callbackQuery("clear_cart", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply("Clear every item from your cart?", {
+      reply_markup: new InlineKeyboard().text("Yes, clear cart", "confirm_clear_cart").text("Keep my cart", "cart"),
+    });
+  });
+  bot.callbackQuery("confirm_clear_cart", async (ctx) => {
     const customer = await ensureCustomer(ctx);
     const cartId = await getOrCreateCart(customer.id);
     await getSupabase().from("blissbl_cart_items").delete().eq("cart_id", cartId);
@@ -454,10 +556,18 @@ export function getBot(): Bot {
     await showCart(ctx);
   });
   bot.callbackQuery("checkout", async (ctx) => {
-    await ensureCustomer(ctx);
+    const customer = await ensureCustomer(ctx);
+    const cartId = await getOrCreateCart(customer.id);
+    const { count, error } = await getSupabase().from("blissbl_cart_items").select("id", { head: true, count: "exact" }).eq("cart_id", cartId);
+    if (error) throw error;
+    if (!count) {
+      await ctx.answerCallbackQuery({ text: "Your cart is empty" });
+      await showCart(ctx);
+      return;
+    }
     await setSession(ctx.from.id, "CHECKOUT_FULL_NAME", {});
     await ctx.answerCallbackQuery();
-    await ctx.reply("🧾 <b>Delivery information</b>\n\nWhat is your full name?", { parse_mode: "HTML" });
+    await ctx.reply("<b>Delivery information</b>\n\nStep 1 of 7: What is your full name?", { parse_mode: "HTML" });
   });
   bot.callbackQuery("confirm_order", async (ctx) => {
     const customer = await ensureCustomer(ctx);
@@ -470,33 +580,72 @@ export function getBot(): Bot {
     const result = await db.rpc("blissbl_checkout_cart", { p_customer_id: customer.id, p_delivery: session.context });
     if (result.error) throw result.error;
     const order = (result.data as Array<{ order_id: string; order_number: string; total_mmk: number }>)[0];
-    await db.from("blissbl_customers").update({ full_name: session.context.full_name, phone: session.context.phone }).eq("id", customer.id);
+    const delivery = session.context as Record<string, string>;
+    const { error: customerError } = await db.from("blissbl_customers").update({ full_name: delivery.full_name, phone: delivery.phone }).eq("id", customer.id);
+    if (customerError) throw customerError;
+    const { error: addressError } = await db.from("blissbl_delivery_addresses").insert({
+      customer_id: customer.id,
+      recipient_name: delivery.recipient_name,
+      phone: delivery.recipient_phone,
+      address_line: delivery.address_line,
+      township: delivery.township,
+      city: delivery.city,
+      delivery_note: delivery.delivery_note || null,
+      is_default: false,
+    });
+    if (addressError) throw addressError;
     await setSession(ctx.from.id, "AWAITING_PAYMENT", { order_id: order.order_id });
     await ctx.answerCallbackQuery({ text: "Order created" });
     await ctx.replyWithPhoto(`${getConfig().APP_URL}/assets/kpay-qr.jpg`, {
-      caption: `💳 <b>Payment</b>\nOrder: <b>${escapeHtml(order.order_number)}</b>\nTotal: <b>${formatMmk(order.total_mmk)}</b>\n\nKPay QR ကို scan ဖတ်ပြီး payment ပြုလုပ်ပါ။ Payment ပြီးသွားရင် screenshot/slip ကို ဒီ chat ထဲ upload လုပ်ပေးပါ။`,
+      caption: `<b>Payment</b>\nOrder: <b>${escapeHtml(order.order_number)}</b>\nTotal: <b>${formatMmk(order.total_mmk)}</b>\n\nScan the KPay QR, complete payment, then upload your screenshot or PDF slip in this chat.`,
       parse_mode: "HTML",
     });
   });
   bot.callbackQuery("my_orders", async (ctx) => { await ctx.answerCallbackQuery(); await showOrders(ctx); });
+  bot.callbackQuery(/^resubmit:([^:]+)$/, async (ctx) => {
+    const customer = await ensureCustomer(ctx);
+    const orderId = ctx.match[1];
+    const { data: order, error } = await getSupabase()
+      .from("blissbl_orders")
+      .select("id,order_number,total_mmk,status")
+      .eq("id", orderId)
+      .eq("customer_id", customer.id)
+      .eq("status", "PAYMENT_DECLINED")
+      .single();
+    if (error || !order) {
+      await ctx.answerCallbackQuery({ text: "This order is not ready for resubmission" });
+      return;
+    }
+    await setSession(ctx.from.id, "AWAITING_PAYMENT", { order_id: order.id });
+    await ctx.answerCallbackQuery();
+    await ctx.replyWithPhoto(`${getConfig().APP_URL}/assets/kpay-qr.jpg`, {
+      caption: `<b>Resubmit payment</b>\nOrder: <b>${escapeHtml(order.order_number)}</b>\nTotal: <b>${formatMmk(order.total_mmk)}</b>\n\nScan the KPay QR, then upload your new screenshot or PDF slip here.`,
+      parse_mode: "HTML",
+    });
+  });
   bot.callbackQuery("account", async (ctx) => {
     const customer = await ensureCustomer(ctx);
     await ctx.answerCallbackQuery();
-    await ctx.reply(`👤 <b>My Account</b>\n\nName: ${escapeHtml(customer.full_name || "Not set yet")}\nPhone: ${escapeHtml(customer.phone || "Not set yet")}`, { parse_mode: "HTML", reply_markup: backToMenu() });
+    await ctx.reply(`<b>My Account</b>\n\nName: ${escapeHtml(customer.full_name || "Not set yet")}\nPhone: ${escapeHtml(customer.phone || "Not set yet")}`, { parse_mode: "HTML", reply_markup: backToMenu() });
   });
   bot.callbackQuery("help", async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.reply("❓ <b>Need help?</b>\n\nShop → add products → open cart → checkout → pay with KPay → upload your slip. We will notify you after review.", { parse_mode: "HTML", reply_markup: backToMenu() });
+    await ctx.reply("<b>Need help?</b>\n\n1. Open Shop and choose a product.\n2. Add it to My Cart.\n3. Adjust quantities, then choose Checkout.\n4. Confirm delivery details.\n5. Pay with KPay and upload your slip.\n\nWe will notify you after payment review.", { parse_mode: "HTML", reply_markup: backToMenu() });
   });
 
   bot.callbackQuery("admin:home", async (ctx) => { await ctx.answerCallbackQuery(); await showAdmin(ctx); });
   bot.callbackQuery("admin:payments", async (ctx) => { await ctx.answerCallbackQuery(); await showPendingPayments(ctx); });
+  bot.callbackQuery("admin:customers", async (ctx) => { await ctx.answerCallbackQuery(); await showAdminCustomers(ctx); });
+  bot.callbackQuery("admin:products", async (ctx) => { await ctx.answerCallbackQuery(); await showAdminProducts(ctx); });
+  bot.callbackQuery("admin:addresses", async (ctx) => { await ctx.answerCallbackQuery(); await showAdminAddresses(ctx); });
+  bot.callbackQuery("admin:export", async (ctx) => { await ctx.answerCallbackQuery({ text: "Preparing export" }); await exportAdminOrders(ctx); });
+  bot.callbackQuery("admin:settings", async (ctx) => { await ctx.answerCallbackQuery(); await showAdminSettings(ctx); });
   bot.callbackQuery("admin:orders", async (ctx) => {
     if (!(await isAdmin(ctx.from.id))) return;
     const { data } = await getSupabase().from("blissbl_orders").select("order_number,total_mmk,status,placed_at,customers:blissbl_customers(full_name,telegram_username)").order("placed_at", { ascending: false }).limit(10);
-    const lines = ((data ?? []) as unknown as Array<{ order_number: string; total_mmk: number; status: string }>).map((o) => `• <b>${o.order_number}</b> — ${formatMmk(o.total_mmk)}\n  ${statusLabels[o.status] ?? o.status}`).join("\n\n");
+    const lines = ((data ?? []) as unknown as Array<{ order_number: string; total_mmk: number; status: string }>).map((o) => `<b>${o.order_number}</b> - ${formatMmk(o.total_mmk)}\n${statusLabels[o.status] ?? o.status}`).join("\n\n");
     await ctx.answerCallbackQuery();
-    await ctx.reply(`📦 <b>Recent orders</b>\n\n${lines || "No orders yet."}`, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("← Admin", "admin:home") });
+    await ctx.reply(`<b>Recent orders</b>\n\n${lines || "No orders yet."}`, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("Admin", "admin:home") });
   });
   bot.callbackQuery("admin:report", async (ctx) => {
     if (!(await isAdmin(ctx.from.id))) return;
@@ -505,7 +654,7 @@ export function getBot(): Bot {
     const paid = orders.filter((o) => !["PENDING_PAYMENT", "PAYMENT_REVIEW", "PAYMENT_DECLINED", "CANCELLED"].includes(o.status));
     const revenue = paid.reduce((sum, o) => sum + Number(o.total_mmk), 0);
     await ctx.answerCallbackQuery();
-    await ctx.reply(`📊 <b>Shop report</b>\n\nOrders: <b>${orders.length}</b>\nPaid orders: <b>${paid.length}</b>\nRevenue: <b>${formatMmk(revenue)}</b>`, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("← Admin", "admin:home") });
+    await ctx.reply(`<b>Shop report</b>\n\nOrders: <b>${orders.length}</b>\nPaid orders: <b>${paid.length}</b>\nRevenue: <b>${formatMmk(revenue)}</b>`, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("Admin", "admin:home") });
   });
   bot.callbackQuery(/^pay:approve:([^:]+)$/, async (ctx) => {
     if (!(await isAdmin(ctx.from.id))) { await ctx.answerCallbackQuery({ text: "Admin only" }); return; }
@@ -513,8 +662,8 @@ export function getBot(): Bot {
     if (result.error) throw result.error;
     const row = (result.data as Array<{ customer_telegram_user_id: number; order_number: string; total_mmk: number }>)[0];
     await ctx.answerCallbackQuery({ text: "Payment approved" });
-    await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard().text("✅ Approved", "noop") });
-    await ctx.api.sendMessage(row.customer_telegram_user_id, `💗 Payment approved!\n\nOrder: ${row.order_number}\nAmount: ${formatMmk(row.total_mmk)}\nOrder status: Confirmed\n\nBLISSBL ကို အားပေးတဲ့အတွက် ကျေးဇူးတင်ပါတယ်။`);
+    await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard().text("Approved", "noop") });
+    await ctx.api.sendMessage(row.customer_telegram_user_id, `Payment approved!\n\nOrder: ${row.order_number}\nAmount: ${formatMmk(row.total_mmk)}\nOrder status: Confirmed\n\nYour BLISSBL order is now being prepared.`);
   });
   bot.callbackQuery(/^pay:decline:([^:]+)$/, async (ctx) => {
     if (!(await isAdmin(ctx.from.id))) { await ctx.answerCallbackQuery({ text: "Admin only" }); return; }
@@ -537,13 +686,18 @@ export function getBot(): Bot {
       if (result.error) throw result.error;
       const row = (result.data as Array<{ customer_telegram_user_id: number; order_number: string }>)[0];
       await setSession(ctx.from.id, "IDLE");
-      await ctx.reply("Payment declined and customer notified.", { reply_markup: new InlineKeyboard().text("← Admin", "admin:home") });
+      await ctx.reply("Payment declined and customer notified.", { reply_markup: new InlineKeyboard().text("Admin", "admin:home") });
       await ctx.api.sendMessage(row.customer_telegram_user_id, `Payment declined for ${row.order_number}.\nReason: ${text.trim()}\n\nPlease open your order and submit a new payment slip.`);
     }
   });
 
-  bot.catch((error) => {
+  bot.catch(async (error) => {
     console.error("Telegram update failed", { updateId: error.ctx.update.update_id, message: error.error instanceof Error ? error.error.message : "unknown" });
+    try {
+      await error.ctx.reply("Sorry, something went wrong. Please tap Main menu and try again.", { reply_markup: mainMenu() });
+    } catch {
+      // Ignore secondary Telegram errors while handling the original failure.
+    }
   });
   singleton = bot;
   return bot;
