@@ -304,16 +304,125 @@ async function showAdminProducts(ctx: Context): Promise<void> {
   if (!ctx.from || !(await isAdmin(ctx.from.id))) return;
   const { data, error } = await getSupabase()
     .from("blissbl_products")
-    .select("name,sku,price_mmk,stock_quantity,is_available")
+    .select("id,name,sku,price_mmk,stock_quantity,is_available")
     .order("name")
     .limit(50);
   if (error) throw error;
-  const products = (data ?? []) as Array<{ name: string; sku: string | null; price_mmk: number; stock_quantity: number | null; is_available: boolean }>;
-  const lines = products.map((product) => `${product.is_available ? "Available" : "Hidden"} | <b>${escapeHtml(product.name)}</b>\n${product.sku ? `SKU: ${escapeHtml(product.sku)} | ` : ""}${formatMmk(product.price_mmk)} | Stock: ${product.stock_quantity ?? "Unlimited"}`);
-  await ctx.reply(`<b>Inventory</b>\n\n${lines.join("\n\n") || "No products yet."}`, {
+  const products = (data ?? []) as Array<{ id: string; name: string; sku: string | null; price_mmk: number; stock_quantity: number | null; is_available: boolean }>;
+  await ctx.reply(`<b>Inventory</b>\n\n${products.length ? "Choose a product to edit, hide, or delete." : "No products yet."}`, {
     parse_mode: "HTML",
-    reply_markup: new InlineKeyboard().text("Admin", "admin:home"),
+    reply_markup: new InlineKeyboard().text("Add product", "admin:prod:add").text("Admin", "admin:home"),
   });
+  for (const product of products) {
+    const status = product.is_available ? "Available" : "Hidden";
+    await ctx.reply(`${status} | <b>${escapeHtml(product.name)}</b>\n${product.sku ? `SKU: ${escapeHtml(product.sku)} | ` : ""}${formatMmk(product.price_mmk)} | Stock: ${product.stock_quantity ?? "Unlimited"}`, {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard()
+        .text("Edit", `admin:prod:edit:${product.id}`)
+        .text(product.is_available ? "Hide" : "Show", `admin:prod:t:${product.id}`)
+        .text("Delete", `admin:prod:d:${product.id}`),
+    });
+  }
+}
+
+type AdminProductDraft = {
+  category_id: string;
+  name: string;
+  description: string;
+  price_mmk: number;
+  stock_quantity: number | null;
+  sku: string | null;
+  image_path: string | null;
+  image_url: string | null;
+};
+
+async function startAdminProductAdd(ctx: Context): Promise<void> {
+  if (!ctx.from || !(await isAdmin(ctx.from.id))) return;
+  const { data, error } = await getSupabase()
+    .from("blissbl_categories")
+    .select("id,name")
+    .eq("is_active", true)
+    .order("sort_order");
+  if (error) throw error;
+  const keyboard = new InlineKeyboard();
+  for (const category of (data ?? []) as Array<{ id: string; name: string }>) {
+    keyboard.text(category.name, `admin:prod:addcat:${category.id}`).row();
+  }
+  keyboard.text("Cancel", "admin:products");
+  await ctx.reply("<b>Add product</b>\n\nFirst choose a category.", { parse_mode: "HTML", reply_markup: keyboard });
+}
+
+async function showAdminProductEditMenu(ctx: Context, productId: string): Promise<void> {
+  if (!ctx.from || !(await isAdmin(ctx.from.id))) return;
+  const { data, error } = await getSupabase()
+    .from("blissbl_products")
+    .select("id,name,description,price_mmk,stock_quantity,sku,image_path,image_url,is_available")
+    .eq("id", productId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    await ctx.reply("Product not found.", { reply_markup: new InlineKeyboard().text("Inventory", "admin:products") });
+    return;
+  }
+  const product = data as ProductRow;
+  const keyboard = new InlineKeyboard()
+    .text("Name", `admin:prod:f:name:${productId}`)
+    .text("Description", `admin:prod:f:description:${productId}`)
+    .row()
+    .text("Price", `admin:prod:f:price:${productId}`)
+    .text("Stock", `admin:prod:f:stock:${productId}`)
+    .row()
+    .text("SKU", `admin:prod:f:sku:${productId}`)
+    .text("Image", `admin:prod:f:image:${productId}`)
+    .row()
+    .text(product.is_available ? "Hide from shop" : "Show in shop", `admin:prod:t:${productId}`)
+    .text("Delete", `admin:prod:d:${productId}`)
+    .row()
+    .text("Inventory", "admin:products");
+  await ctx.reply(`<b>Edit product</b>\n\n<b>${escapeHtml(product.name)}</b>\n${formatMmk(product.price_mmk)} | Stock: ${product.stock_quantity ?? "Unlimited"}\nSKU: ${escapeHtml(product.sku || "Not set")}\nStatus: ${product.is_available ? "Available" : "Hidden"}\n\nChoose a field to edit.`, {
+    parse_mode: "HTML",
+    reply_markup: keyboard,
+  });
+}
+
+async function confirmAdminProductAdd(ctx: Context): Promise<void> {
+  if (!ctx.from || !(await isAdmin(ctx.from.id))) return;
+  const session = await getSession(ctx.from.id);
+  if (session.state !== "ADMIN_PRODUCT_ADD_CONFIRM") {
+    await ctx.reply("This add-product session has expired. Start again from Inventory.", { reply_markup: new InlineKeyboard().text("Inventory", "admin:products") });
+    return;
+  }
+  const draft = { ...session.context } as unknown as AdminProductDraft & { category_name?: string };
+  delete draft.category_name;
+  const { data: product, error } = await getSupabase()
+    .from("blissbl_products")
+    .insert({ ...draft, is_available: true, is_new: true, is_best_seller: false })
+    .select("id,name")
+    .single();
+  if (error) {
+    if (error.code === "23505") {
+      await ctx.reply("That SKU is already in use. Start again with a different SKU.", { reply_markup: new InlineKeyboard().text("Inventory", "admin:products") });
+      await setSession(ctx.from.id, "IDLE");
+      return;
+    }
+    throw error;
+  }
+  await setSession(ctx.from.id, "IDLE");
+  await ctx.reply(`Product added: <b>${escapeHtml((product as { name: string }).name)}</b>`, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("Inventory", "admin:products") });
+}
+
+async function deleteAdminProduct(ctx: Context, productId: string): Promise<void> {
+  if (!ctx.from || !(await isAdmin(ctx.from.id))) return;
+  const { data: product, error: lookupError } = await getSupabase().from("blissbl_products").select("name").eq("id", productId).maybeSingle();
+  if (lookupError) throw lookupError;
+  if (!product) {
+    await ctx.reply("Product not found.", { reply_markup: new InlineKeyboard().text("Inventory", "admin:products") });
+    return;
+  }
+  const { error } = await getSupabase().from("blissbl_products").delete().eq("id", productId);
+  if (error) throw error;
+  await setSession(ctx.from.id, "IDLE");
+  await ctx.reply(`Deleted product: <b>${escapeHtml((product as { name: string }).name)}</b>`, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("Inventory", "admin:products") });
 }
 
 async function showAdminAddresses(ctx: Context): Promise<void> {
@@ -384,6 +493,96 @@ async function showPendingPayments(ctx: Context): Promise<void> {
     if (signed?.signedUrl) await ctx.replyWithPhoto(signed.signedUrl, { caption, parse_mode: "HTML", reply_markup: keyboard });
     else await ctx.reply(caption, { parse_mode: "HTML", reply_markup: keyboard });
   }
+}
+
+async function processAdminProductText(ctx: Context, session: SessionRow, text: string): Promise<boolean> {
+  if (!ctx.from || !session.state.startsWith("ADMIN_PRODUCT_")) return false;
+  if (!(await isAdmin(ctx.from.id))) {
+    await setSession(ctx.from.id, "IDLE");
+    return false;
+  }
+  const value = text.trim();
+  const addSteps: Record<string, { key: keyof AdminProductDraft; next: string; prompt: string }> = {
+    ADMIN_PRODUCT_ADD_NAME: { key: "name", next: "ADMIN_PRODUCT_ADD_DESCRIPTION", prompt: "Step 3 of 7: Product description? Send '-' to skip." },
+    ADMIN_PRODUCT_ADD_DESCRIPTION: { key: "description", next: "ADMIN_PRODUCT_ADD_PRICE", prompt: "Step 4 of 7: Price in MMK (numbers only)?" },
+    ADMIN_PRODUCT_ADD_PRICE: { key: "price_mmk", next: "ADMIN_PRODUCT_ADD_STOCK", prompt: "Step 5 of 7: Stock quantity? Send '-' for unlimited stock." },
+    ADMIN_PRODUCT_ADD_STOCK: { key: "stock_quantity", next: "ADMIN_PRODUCT_ADD_SKU", prompt: "Step 6 of 7: SKU? Send '-' to leave it blank." },
+    ADMIN_PRODUCT_ADD_SKU: { key: "sku", next: "ADMIN_PRODUCT_ADD_IMAGE", prompt: "Step 7 of 7: Image URL or filename under /assets? Send '-' to skip." },
+    ADMIN_PRODUCT_ADD_IMAGE: { key: "image_path", next: "ADMIN_PRODUCT_ADD_CONFIRM", prompt: "" },
+  };
+  const addStep = addSteps[session.state];
+  if (addStep) {
+    let parsed: string | number | null = value;
+    if (session.state === "ADMIN_PRODUCT_ADD_NAME") {
+      if (value.length < 2 || value.length > 120) { await ctx.reply("Name must be between 2 and 120 characters. Try again."); return true; }
+    } else if (session.state === "ADMIN_PRODUCT_ADD_DESCRIPTION") {
+      parsed = value === "-" ? "" : value;
+      if (String(parsed).length > 500) { await ctx.reply("Description must be 500 characters or fewer. Try again."); return true; }
+    } else if (session.state === "ADMIN_PRODUCT_ADD_PRICE") {
+      if (!/^\d+$/.test(value) || Number(value) <= 0) { await ctx.reply("Price must be a positive whole number in MMK. Try again."); return true; }
+      parsed = Number(value);
+    } else if (session.state === "ADMIN_PRODUCT_ADD_STOCK") {
+      if (value === "-") parsed = null;
+      else if (!/^\d+$/.test(value)) { await ctx.reply("Stock must be a whole number, or '-' for unlimited. Try again."); return true; }
+      else parsed = Number(value);
+    } else if (session.state === "ADMIN_PRODUCT_ADD_SKU") {
+      parsed = value === "-" ? null : value;
+      if (parsed && (String(parsed).length < 2 || String(parsed).length > 80)) { await ctx.reply("SKU must be between 2 and 80 characters, or '-'. Try again."); return true; }
+    } else if (session.state === "ADMIN_PRODUCT_ADD_IMAGE") {
+      parsed = value === "-" ? null : value;
+      if (parsed && String(parsed).length > 500) { await ctx.reply("Image URL or filename must be 500 characters or fewer. Try again."); return true; }
+    }
+    const nextContext = { ...session.context, [addStep.key]: parsed };
+    await setSession(ctx.from.id, addStep.next, nextContext);
+    if (session.state === "ADMIN_PRODUCT_ADD_IMAGE") {
+      const draft = nextContext as unknown as AdminProductDraft;
+      const imageValue = value === "-" ? null : value;
+      const finalDraft = { ...draft, image_path: imageValue && !/^https?:\/\//i.test(imageValue) ? imageValue : null, image_url: imageValue && /^https?:\/\//i.test(imageValue) ? imageValue : null };
+      await setSession(ctx.from.id, "ADMIN_PRODUCT_ADD_CONFIRM", finalDraft);
+      await ctx.reply(`<b>Review new product</b>\n\nName: ${escapeHtml(finalDraft.name)}\nPrice: ${formatMmk(finalDraft.price_mmk)}\nStock: ${finalDraft.stock_quantity ?? "Unlimited"}\nSKU: ${escapeHtml(finalDraft.sku || "Not set")}\nImage: ${escapeHtml(imageValue || "Not set")}`, {
+        parse_mode: "HTML",
+        reply_markup: new InlineKeyboard().text("Save product", "admin:prod:addsave").text("Cancel", "admin:products"),
+      });
+    } else {
+      await ctx.reply(addStep.prompt);
+    }
+    return true;
+  }
+
+  const editMatch = /^ADMIN_PRODUCT_EDIT_(NAME|DESCRIPTION|PRICE|STOCK|SKU|IMAGE)$/.exec(session.state);
+  if (!editMatch) {
+    if (session.state === "ADMIN_PRODUCT_EDIT_MENU" || session.state === "ADMIN_PRODUCT_ADD_CONFIRM") {
+      await ctx.reply("Please use the buttons above to continue.");
+      return true;
+    }
+    return false;
+  }
+  const productId = String(session.context.product_id ?? "");
+  if (!productId) { await setSession(ctx.from.id, "IDLE"); return false; }
+  const field = editMatch[1].toLowerCase();
+  const column: string = field === "image" ? "image_path" : field === "price" ? "price_mmk" : field === "stock" ? "stock_quantity" : field;
+  let parsed: string | number | null = value;
+  if (field === "name" && (value.length < 2 || value.length > 120)) { await ctx.reply("Name must be between 2 and 120 characters. Try again."); return true; }
+  if (field === "description") { parsed = value === "-" ? "" : value; if (String(parsed).length > 500) { await ctx.reply("Description must be 500 characters or fewer. Try again."); return true; } }
+  if (field === "price") { if (!/^\d+$/.test(value) || Number(value) <= 0) { await ctx.reply("Price must be a positive whole number in MMK. Try again."); return true; } parsed = Number(value); }
+  if (field === "stock") { if (value === "-") parsed = null; else if (!/^\d+$/.test(value)) { await ctx.reply("Stock must be a whole number, or '-' for unlimited. Try again."); return true; } else parsed = Number(value); }
+  if (field === "sku") { parsed = value === "-" ? null : value; if (parsed && (String(parsed).length < 2 || String(parsed).length > 80)) { await ctx.reply("SKU must be between 2 and 80 characters, or '-'. Try again."); return true; } }
+  if (field === "image") {
+    const imageValue = value === "-" ? null : value;
+    const update = { image_path: imageValue && !/^https?:\/\//i.test(imageValue) ? imageValue : null, image_url: imageValue && /^https?:\/\//i.test(imageValue) ? imageValue : null };
+    const result = await getSupabase().from("blissbl_products").update(update).eq("id", productId);
+    if (result.error) throw result.error;
+  } else {
+    const result = await getSupabase().from("blissbl_products").update({ [column]: parsed }).eq("id", productId);
+    if (result.error) {
+      if (result.error.code === "23505") { await ctx.reply("That SKU is already in use. Try another one."); return true; }
+      throw result.error;
+    }
+  }
+  await setSession(ctx.from.id, "ADMIN_PRODUCT_EDIT_MENU", { product_id: productId });
+  await ctx.reply("Product updated.");
+  await showAdminProductEditMenu(ctx, productId);
+  return true;
 }
 
 async function processDeliveryText(ctx: Context, session: SessionRow, text: string): Promise<boolean> {
@@ -654,6 +853,77 @@ export function getBot(): Bot {
   bot.callbackQuery("admin:payments", async (ctx) => { await ctx.answerCallbackQuery(); await showPendingPayments(ctx); });
   bot.callbackQuery("admin:customers", async (ctx) => { await ctx.answerCallbackQuery(); await showAdminCustomers(ctx); });
   bot.callbackQuery("admin:products", async (ctx) => { await ctx.answerCallbackQuery(); await showAdminProducts(ctx); });
+  bot.callbackQuery("admin:prod:add", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await startAdminProductAdd(ctx);
+  });
+  bot.callbackQuery(/^admin:prod:addcat:([^:]+)$/, async (ctx) => {
+    if (!(await isAdmin(ctx.from.id))) return;
+    const categoryId = ctx.match[1];
+    const { data: category, error } = await getSupabase().from("blissbl_categories").select("id,name").eq("id", categoryId).eq("is_active", true).maybeSingle();
+    if (error) throw error;
+    if (!category) {
+      await ctx.answerCallbackQuery({ text: "Category not found" });
+      return;
+    }
+    await setSession(ctx.from.id, "ADMIN_PRODUCT_ADD_NAME", { category_id: categoryId, category_name: (category as { name: string }).name });
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`<b>Add product</b>\nCategory: ${escapeHtml((category as { name: string }).name)}\n\nStep 2 of 7: Product name?`, { parse_mode: "HTML" });
+  });
+  bot.callbackQuery("admin:prod:addsave", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await confirmAdminProductAdd(ctx);
+  });
+  bot.callbackQuery(/^admin:prod:edit:([^:]+)$/, async (ctx) => {
+    if (!(await isAdmin(ctx.from.id))) return;
+    await ctx.answerCallbackQuery();
+    await setSession(ctx.from.id, "ADMIN_PRODUCT_EDIT_MENU", { product_id: ctx.match[1] });
+    await showAdminProductEditMenu(ctx, ctx.match[1]);
+  });
+  bot.callbackQuery(/^admin:prod:f:(name|description|price|stock|sku|image):([^:]+)$/, async (ctx) => {
+    if (!(await isAdmin(ctx.from.id))) return;
+    const field = ctx.match[1];
+    const prompts: Record<string, string> = {
+      name: "Send the new product name (2-120 characters).",
+      description: "Send the new description, or '-' to clear it.",
+      price: "Send the new price in MMK (positive whole number).",
+      stock: "Send the new stock quantity, or '-' for unlimited stock.",
+      sku: "Send the new SKU, or '-' to clear it.",
+      image: "Send an image URL or filename under /assets, or '-' to clear it.",
+    };
+    await setSession(ctx.from.id, `ADMIN_PRODUCT_EDIT_${field.toUpperCase()}`, { product_id: ctx.match[2] });
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`<b>Edit ${field}</b>\n\n${prompts[field]}`, { parse_mode: "HTML" });
+  });
+  bot.callbackQuery(/^admin:prod:t:([^:]+)$/, async (ctx) => {
+    if (!(await isAdmin(ctx.from.id))) return;
+    const productId = ctx.match[1];
+    const { data: product, error: lookupError } = await getSupabase().from("blissbl_products").select("name,is_available").eq("id", productId).maybeSingle();
+    if (lookupError) throw lookupError;
+    if (!product) { await ctx.answerCallbackQuery({ text: "Product not found" }); return; }
+    const nextAvailability = !(product as { is_available: boolean }).is_available;
+    const { error } = await getSupabase().from("blissbl_products").update({ is_available: nextAvailability }).eq("id", productId);
+    if (error) throw error;
+    await ctx.answerCallbackQuery({ text: nextAvailability ? "Product visible" : "Product hidden" });
+    await ctx.reply(`<b>${escapeHtml((product as { name: string }).name)}</b> is now ${nextAvailability ? "visible in" : "hidden from"} the shop.`, { parse_mode: "HTML", reply_markup: new InlineKeyboard().text("Edit product", `admin:prod:edit:${productId}`).text("Inventory", "admin:products") });
+  });
+  bot.callbackQuery(/^admin:prod:d:([^:]+)$/, async (ctx) => {
+    if (!(await isAdmin(ctx.from.id))) return;
+    const productId = ctx.match[1];
+    const { data: product, error } = await getSupabase().from("blissbl_products").select("name").eq("id", productId).maybeSingle();
+    if (error) throw error;
+    if (!product) { await ctx.answerCallbackQuery({ text: "Product not found" }); return; }
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`Delete <b>${escapeHtml((product as { name: string }).name)}</b> permanently? Existing cart rows will be removed and past order items will keep their saved name.`, {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard().text("Delete permanently", `admin:prod:dy:${productId}`).text("Keep product", "admin:products"),
+    });
+  });
+  bot.callbackQuery(/^admin:prod:dy:([^:]+)$/, async (ctx) => {
+    if (!(await isAdmin(ctx.from.id))) return;
+    await ctx.answerCallbackQuery({ text: "Deleting product" });
+    await deleteAdminProduct(ctx, ctx.match[1]);
+  });
   bot.callbackQuery("admin:addresses", async (ctx) => { await ctx.answerCallbackQuery(); await showAdminAddresses(ctx); });
   bot.callbackQuery("admin:export", async (ctx) => { await ctx.answerCallbackQuery({ text: "Preparing export" }); await exportAdminOrders(ctx); });
   bot.callbackQuery("admin:settings", async (ctx) => { await ctx.answerCallbackQuery(); await showAdminSettings(ctx); });
@@ -694,6 +964,7 @@ export function getBot(): Bot {
     if (await handlePaymentSlip(ctx, session)) return;
     if (!ctx.message.text) return;
     const text = ctx.message.text;
+    if (await processAdminProductText(ctx, session, text)) return;
     if (await processDeliveryText(ctx, session, text)) return;
     if (session.state === "CHECKOUT_NOTE") { await finishDelivery(ctx, session, text); return; }
     if (session.state === "ADMIN_DECLINE_REASON") {
