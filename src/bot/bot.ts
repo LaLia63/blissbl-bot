@@ -187,7 +187,7 @@ async function showCart(ctx: Context): Promise<void> {
   const cartId = await getOrCreateCart(customer.id);
   const { data, error } = await getSupabase()
     .from("blissbl_cart_items")
-    .select("quantity,products(id,name,price_mmk,is_available,stock_quantity)")
+    .select("quantity,products:blissbl_products(id,name,price_mmk,is_available,stock_quantity)")
     .eq("cart_id", cartId)
     .order("created_at");
   if (error) throw error;
