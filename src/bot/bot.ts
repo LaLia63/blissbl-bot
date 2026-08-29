@@ -89,6 +89,10 @@ async function showMainMenu(ctx: Context, message = "What would you like to do?"
   await ctx.reply(message, { reply_markup: mainMenu() });
 }
 
+async function showHelp(ctx: Context): Promise<void> {
+  await ctx.reply("<b>Need help?</b>\n\n1. Open Shop and choose a product.\n2. Add it to My Cart.\n3. Adjust quantities, then choose Checkout.\n4. Confirm delivery details.\n5. Pay with KPay and upload your slip.\n\nWe will notify you after payment review.", { parse_mode: "HTML", reply_markup: backToMenu() });
+}
+
 async function showCategories(ctx: Context): Promise<void> {
   const { data, error } = await getSupabase()
     .from("blissbl_categories")
@@ -501,6 +505,11 @@ export function getBot(): Bot {
     await showMainMenu(ctx, "Choose Shop to browse, My Cart to review your items, or My Orders to track a purchase.");
   });
 
+  // Keep the Telegram command menu in sync with the inline buttons.
+  bot.command("shop", showCategories);
+  bot.command("cart", showCart);
+  bot.command("orders", showOrders);
+  bot.command("help", showHelp);
   bot.command("admin", showAdmin);
   bot.callbackQuery("main_menu", async (ctx) => { await ctx.answerCallbackQuery(); await showMainMenu(ctx); });
   bot.callbackQuery("shop", async (ctx) => { await ctx.answerCallbackQuery(); await showCategories(ctx); });
@@ -523,7 +532,15 @@ export function getBot(): Bot {
       reply_markup: new InlineKeyboard().text("View my cart", "cart").text("Keep shopping", "shop"),
     });
   });
-  bot.callbackQuery("cart", async (ctx) => { await ctx.answerCallbackQuery(); await showCart(ctx); });
+  bot.callbackQuery("cart", async (ctx) => {
+    try {
+      await ctx.answerCallbackQuery();
+    } catch (error) {
+      // An old inline button can have an expired callback query; still show the cart.
+      console.warn("Cart callback acknowledgement skipped", error instanceof Error ? error.message : "unknown");
+    }
+    await showCart(ctx);
+  });
   bot.callbackQuery(/^qty:([+-]):([^:]+)$/, async (ctx) => {
     const customer = await ensureCustomer(ctx);
     const cartId = await getOrCreateCart(customer.id);
@@ -630,7 +647,7 @@ export function getBot(): Bot {
   });
   bot.callbackQuery("help", async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.reply("<b>Need help?</b>\n\n1. Open Shop and choose a product.\n2. Add it to My Cart.\n3. Adjust quantities, then choose Checkout.\n4. Confirm delivery details.\n5. Pay with KPay and upload your slip.\n\nWe will notify you after payment review.", { parse_mode: "HTML", reply_markup: backToMenu() });
+    await showHelp(ctx);
   });
 
   bot.callbackQuery("admin:home", async (ctx) => { await ctx.answerCallbackQuery(); await showAdmin(ctx); });
