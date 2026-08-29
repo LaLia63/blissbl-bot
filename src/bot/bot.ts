@@ -636,6 +636,18 @@ async function sendPaymentInstructions(ctx: Context, order: PaymentOrder, title 
   }
 }
 
+async function reportCheckoutFailure(ctx: Context, error: unknown, stage: string): Promise<void> {
+  console.error("Checkout failed", {
+    stage,
+    userId: ctx.from?.id,
+    error: error instanceof Error ? { name: error.name, message: error.message } : error,
+  });
+  try { await ctx.answerCallbackQuery({ text: "Checkout unavailable" }); } catch { /* callback may be expired */ }
+  await ctx.reply("Checkout could not continue. Please open My Cart again and try Checkout once more.", {
+    reply_markup: new InlineKeyboard().text("Open my cart", "cart").text("Main menu", "main_menu"),
+  });
+}
+
 async function handlePaymentSlip(ctx: Context, session: SessionRow): Promise<boolean> {
   if (session.state !== "AWAITING_PAYMENT" || !ctx.from) return false;
   const message = ctx.message;
@@ -787,18 +799,22 @@ export function getBot(): Bot {
     await showCart(ctx);
   });
   bot.callbackQuery("checkout", async (ctx) => {
-    const customer = await ensureCustomer(ctx);
-    const cartId = await getOrCreateCart(customer.id);
-    const { count, error } = await getSupabase().from("blissbl_cart_items").select("id", { head: true, count: "exact" }).eq("cart_id", cartId);
-    if (error) throw error;
-    if (!count) {
-      try { await ctx.answerCallbackQuery({ text: "Your cart is empty" }); } catch { /* callback may be expired */ }
-      await showCart(ctx);
-      return;
+    try {
+      const customer = await ensureCustomer(ctx);
+      const cartId = await getOrCreateCart(customer.id);
+      const { count, error } = await getSupabase().from("blissbl_cart_items").select("product_id", { head: true, count: "exact" }).eq("cart_id", cartId);
+      if (error) throw error;
+      if (!count) {
+        try { await ctx.answerCallbackQuery({ text: "Your cart is empty" }); } catch { /* callback may be expired */ }
+        await showCart(ctx);
+        return;
+      }
+      await setSession(ctx.from.id, "CHECKOUT_FULL_NAME", {});
+      try { await ctx.answerCallbackQuery(); } catch { /* callback may be expired; continue checkout */ }
+      await ctx.reply("<b>Delivery information</b>\n\nPayment QR will appear after you finish these details and press Confirm order.\n\nStep 1 of 7: What is your full name?", { parse_mode: "HTML" });
+    } catch (error) {
+      await reportCheckoutFailure(ctx, error, "start");
     }
-    await setSession(ctx.from.id, "CHECKOUT_FULL_NAME", {});
-    try { await ctx.answerCallbackQuery(); } catch { /* callback may be expired; continue checkout */ }
-    await ctx.reply("<b>Delivery information</b>\n\nPayment QR will appear after you finish these details and press Confirm order.\n\nStep 1 of 7: What is your full name?", { parse_mode: "HTML" });
   });
   bot.callbackQuery("confirm_order", async (ctx) => {
     const customer = await ensureCustomer(ctx);
