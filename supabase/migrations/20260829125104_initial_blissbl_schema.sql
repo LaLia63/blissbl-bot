@@ -246,7 +246,7 @@ begin
 
   insert into public.blissbl_orders(customer_id, subtotal_mmk, delivery_fee_mmk, total_mmk, delivery)
   values (p_customer_id, v_subtotal, v_delivery_fee, v_subtotal + v_delivery_fee, p_delivery)
-  returning id, orders.order_number into v_order_id, v_order_number;
+  returning blissbl_orders.id, blissbl_orders.order_number into v_order_id, v_order_number;
 
   insert into public.blissbl_order_items(order_id, product_id, product_name, sku, unit_price_mmk, quantity)
   select v_order_id, p.id, p.name, p.sku, p.price_mmk, ci.quantity

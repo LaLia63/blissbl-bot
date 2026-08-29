@@ -621,6 +621,21 @@ async function finishDelivery(ctx: Context, session: SessionRow, note: string): 
   );
 }
 
+type PaymentOrder = { order_id: string; order_number: string | number; total_mmk: number };
+
+async function sendPaymentInstructions(ctx: Context, order: PaymentOrder, title = "Payment"): Promise<void> {
+  const qrUrl = `${getConfig().APP_URL}/assets/kpay-qr.jpg`;
+  const caption = `<b>${title}</b>\nOrder: <b>${escapeHtml(String(order.order_number))}</b>\nTotal: <b>${formatMmk(order.total_mmk)}</b>\n\nScan the KPay QR, complete payment, then upload your screenshot or PDF slip in this chat.`;
+  try {
+    await ctx.replyWithPhoto(qrUrl, { caption, parse_mode: "HTML" });
+  } catch (error) {
+    // Telegram may occasionally reject a remote image URL. Keep checkout usable by
+    // sending the QR URL as text so the customer can still complete payment.
+    console.error("Payment QR delivery failed", error instanceof Error ? { name: error.name, message: error.message } : error);
+    await ctx.reply(`${caption.replace(/<[^>]+>/g, "")}\n\nOpen the payment QR here: ${qrUrl}`);
+  }
+}
+
 async function handlePaymentSlip(ctx: Context, session: SessionRow): Promise<boolean> {
   if (session.state !== "AWAITING_PAYMENT" || !ctx.from) return false;
   const message = ctx.message;
@@ -788,14 +803,38 @@ export function getBot(): Bot {
   bot.callbackQuery("confirm_order", async (ctx) => {
     const customer = await ensureCustomer(ctx);
     const session = await getSession(ctx.from.id);
+    if (session.state === "AWAITING_PAYMENT" && session.context.order_id) {
+      const { data: existingOrder } = await getSupabase()
+        .from("blissbl_orders")
+        .select("id,order_number,total_mmk")
+        .eq("id", String(session.context.order_id))
+        .eq("customer_id", customer.id)
+        .maybeSingle();
+      if (existingOrder) {
+        try { await ctx.answerCallbackQuery({ text: "Payment details resent" }); } catch { /* callback may be expired */ }
+        await sendPaymentInstructions(ctx, { order_id: existingOrder.id, order_number: existingOrder.order_number, total_mmk: existingOrder.total_mmk });
+        return;
+      }
+    }
     if (session.state !== "CONFIRM_ORDER") {
-      await ctx.answerCallbackQuery({ text: "This checkout session expired." });
+      try { await ctx.answerCallbackQuery({ text: "This checkout session expired." }); } catch { /* callback may be expired */ }
       return;
     }
     const db = getSupabase();
     const result = await db.rpc("blissbl_checkout_cart", { p_customer_id: customer.id, p_delivery: session.context });
-    if (result.error) throw result.error;
-    const order = (result.data as Array<{ order_id: string; order_number: string; total_mmk: number }>)[0];
+    if (result.error) {
+      console.error("Checkout order creation failed", result.error);
+      try { await ctx.answerCallbackQuery({ text: "Checkout failed" }); } catch { /* callback may be expired */ }
+      await ctx.reply("I couldn't create the order yet. Please open My Cart and try Checkout again.");
+      return;
+    }
+    const order = (Array.isArray(result.data) ? result.data[0] : result.data) as PaymentOrder | undefined;
+    if (!order?.order_id || order.total_mmk === undefined) {
+      console.error("Checkout returned no order", { data: result.data });
+      try { await ctx.answerCallbackQuery({ text: "Checkout failed" }); } catch { /* callback may be expired */ }
+      await ctx.reply("I couldn't create the order yet. Please open My Cart and try Checkout again.");
+      return;
+    }
     const delivery = session.context as Record<string, string>;
     const { error: customerError } = await db.from("blissbl_customers").update({ full_name: delivery.full_name, phone: delivery.phone }).eq("id", customer.id);
     if (customerError) throw customerError;
@@ -811,11 +850,8 @@ export function getBot(): Bot {
     });
     if (addressError) throw addressError;
     await setSession(ctx.from.id, "AWAITING_PAYMENT", { order_id: order.order_id });
-    await ctx.answerCallbackQuery({ text: "Order created" });
-    await ctx.replyWithPhoto(`${getConfig().APP_URL}/assets/kpay-qr.jpg`, {
-      caption: `<b>Payment</b>\nOrder: <b>${escapeHtml(order.order_number)}</b>\nTotal: <b>${formatMmk(order.total_mmk)}</b>\n\nScan the KPay QR, complete payment, then upload your screenshot or PDF slip in this chat.`,
-      parse_mode: "HTML",
-    });
+    try { await ctx.answerCallbackQuery({ text: "Order created" }); } catch { /* callback may be expired */ }
+    await sendPaymentInstructions(ctx, order);
   });
   bot.callbackQuery("my_orders", async (ctx) => { await ctx.answerCallbackQuery(); await showOrders(ctx); });
   bot.callbackQuery(/^resubmit:([^:]+)$/, async (ctx) => {
@@ -834,10 +870,7 @@ export function getBot(): Bot {
     }
     await setSession(ctx.from.id, "AWAITING_PAYMENT", { order_id: order.id });
     await ctx.answerCallbackQuery();
-    await ctx.replyWithPhoto(`${getConfig().APP_URL}/assets/kpay-qr.jpg`, {
-      caption: `<b>Resubmit payment</b>\nOrder: <b>${escapeHtml(order.order_number)}</b>\nTotal: <b>${formatMmk(order.total_mmk)}</b>\n\nScan the KPay QR, then upload your new screenshot or PDF slip here.`,
-      parse_mode: "HTML",
-    });
+    await sendPaymentInstructions(ctx, { order_id: order.id, order_number: order.order_number, total_mmk: order.total_mmk }, "Resubmit payment");
   });
   bot.callbackQuery("account", async (ctx) => {
     const customer = await ensureCustomer(ctx);
