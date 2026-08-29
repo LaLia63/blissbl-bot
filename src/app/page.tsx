@@ -132,7 +132,7 @@ export default function Home() {
       <section className="px-5 py-16 sm:px-8 sm:py-24">
         <div className="mx-auto grid max-w-7xl gap-8 overflow-hidden rounded-[2.5rem] bg-[#3d1830] p-5 text-white shadow-2xl shadow-primary/15 sm:p-8 lg:grid-cols-[1.05fr_.95fr] lg:items-center">
           <div className="p-3 sm:p-6 lg:p-10">
-            <Badge className="bg-white/10 text-white hover:bg-white/10">AI-crafted BLISSBL story</Badge>
+            <Badge className="bg-white/10 text-white hover:bg-white/10">BLISSBL story</Badge>
             <h2 className="mt-5 max-w-xl font-heading text-4xl font-black leading-[1.02] tracking-[-0.04em] sm:text-5xl">The whole shop lives inside one friendly chat.</h2>
             <p className="mt-5 max-w-lg leading-7 text-white/70">Browse by collection, edit your cart, enter delivery details, pay with KPay and follow every status update without leaving Telegram.</p>
             <Button render={<a href={botUrl} target="_blank" rel="noreferrer" />} variant="secondary" size="lg" className="mt-7 rounded-full px-7">

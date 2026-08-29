@@ -25,6 +25,11 @@ export const metadata: Metadata = {
     description: "Shop mascots, photocards and merchandise directly in Telegram.",
     images: ["/og.png"],
   },
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export const viewport: Viewport = { themeColor: "#9d2d63" };
