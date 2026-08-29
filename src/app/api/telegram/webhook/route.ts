@@ -34,7 +34,11 @@ export async function POST(request: Request): Promise<Response> {
       return Response.json({ ok: true, stale_callback: true });
     }
     await db.from("blissbl_telegram_updates").update({ status: "FAILED", error_code: error instanceof Error ? error.name : "UNKNOWN" }).eq("update_id", update.update_id);
-    console.error("Webhook processing failed", { updateId: update.update_id, message });
+    console.error("Webhook processing failed", {
+      updateId: update.update_id,
+      message,
+      error: error instanceof Error ? { name: error.name, stack: error.stack } : error,
+    });
     return Response.json({ ok: false }, { status: 500 });
   }
 }
