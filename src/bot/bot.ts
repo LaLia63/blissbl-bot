@@ -792,12 +792,12 @@ export function getBot(): Bot {
     const { count, error } = await getSupabase().from("blissbl_cart_items").select("id", { head: true, count: "exact" }).eq("cart_id", cartId);
     if (error) throw error;
     if (!count) {
-      await ctx.answerCallbackQuery({ text: "Your cart is empty" });
+      try { await ctx.answerCallbackQuery({ text: "Your cart is empty" }); } catch { /* callback may be expired */ }
       await showCart(ctx);
       return;
     }
     await setSession(ctx.from.id, "CHECKOUT_FULL_NAME", {});
-    await ctx.answerCallbackQuery();
+    try { await ctx.answerCallbackQuery(); } catch { /* callback may be expired; continue checkout */ }
     await ctx.reply("<b>Delivery information</b>\n\nPayment QR will appear after you finish these details and press Confirm order.\n\nStep 1 of 7: What is your full name?", { parse_mode: "HTML" });
   });
   bot.callbackQuery("confirm_order", async (ctx) => {

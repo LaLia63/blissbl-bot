@@ -27,9 +27,18 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
+    const nestedError = error instanceof Error && "error" in error
+      ? (error as Error & { error?: unknown }).error
+      : undefined;
+    const nestedMessage = nestedError instanceof Error
+      ? nestedError.message
+      : typeof nestedError === "object" && nestedError !== null && "description" in nestedError
+        ? String((nestedError as { description?: unknown }).description ?? "")
+        : typeof nestedError === "string" ? nestedError : "";
+    const combinedMessage = `${message} ${nestedMessage}`;
     // Telegram retries callback updates when the callback query has already expired.
     // Treat those updates as handled so an old button cannot keep the webhook in a retry loop.
-    if (/query is too old|query id is invalid|response timeout expired/i.test(message)) {
+    if (/query is too old|query id is invalid|response timeout expired/i.test(combinedMessage)) {
       await db.from("blissbl_telegram_updates").update({ status: "PROCESSED", processed_at: new Date().toISOString(), error_code: "STALE_CALLBACK" }).eq("update_id", update.update_id);
       return Response.json({ ok: true, stale_callback: true });
     }
@@ -37,6 +46,7 @@ export async function POST(request: Request): Promise<Response> {
     console.error("Webhook processing failed", {
       updateId: update.update_id,
       message,
+      nestedMessage,
       error: error instanceof Error ? { name: error.name, stack: error.stack } : error,
     });
     return Response.json({ ok: false }, { status: 500 });
