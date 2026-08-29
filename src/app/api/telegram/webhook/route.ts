@@ -26,8 +26,15 @@ export async function POST(request: Request): Promise<Response> {
     await db.from("blissbl_telegram_updates").update({ status: "PROCESSED", processed_at: new Date().toISOString(), error_code: null }).eq("update_id", update.update_id);
     return Response.json({ ok: true });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    // Telegram retries callback updates when the callback query has already expired.
+    // Treat those updates as handled so an old button cannot keep the webhook in a retry loop.
+    if (/query is too old|query id is invalid|response timeout expired/i.test(message)) {
+      await db.from("blissbl_telegram_updates").update({ status: "PROCESSED", processed_at: new Date().toISOString(), error_code: "STALE_CALLBACK" }).eq("update_id", update.update_id);
+      return Response.json({ ok: true, stale_callback: true });
+    }
     await db.from("blissbl_telegram_updates").update({ status: "FAILED", error_code: error instanceof Error ? error.name : "UNKNOWN" }).eq("update_id", update.update_id);
-    console.error("Webhook processing failed", { updateId: update.update_id, message: error instanceof Error ? error.message : "unknown" });
+    console.error("Webhook processing failed", { updateId: update.update_id, message });
     return Response.json({ ok: false }, { status: 500 });
   }
 }
