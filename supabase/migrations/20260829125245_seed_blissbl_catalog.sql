@@ -14,10 +14,10 @@ on conflict (slug) do update set
 
 insert into public.blissbl_products(category_id, sku, name, description, price_mmk, image_path, stock_quantity, is_available, is_new, is_best_seller)
 values
-  ((select id from public.blissbl_categories where slug = 'mascots'), 'BLB-MAS-001', 'Avocasian Mascot', 'A soft collectible mascot with a playful avocado-inspired look.', 28000, 'mascot-avocasian.jpg', 20, true, false, true),
+  ((select id from public.blissbl_categories where slug = 'mascots'), 'BLB-MAS-001', 'Avocean Mascot', 'A soft collectible mascot with a playful avocado-inspired look.', 28000, 'mascot-avocasian.jpg', 20, true, false, true),
   ((select id from public.blissbl_categories where slug = 'mascots'), 'BLB-MAS-002', 'Ceri Mascot', 'A sweet cherry-toned mascot made for shelf styling and cosy photos.', 28000, 'mascot-ceri.jpg', 20, true, true, false),
-  ((select id from public.blissbl_categories where slug = 'mascots'), 'BLB-MAS-003', 'Domia Mascot', 'A charming pocket-sized companion from the BLISSBL mascot collection.', 28000, 'mascot-domia.jpg', 20, true, false, false),
-  ((select id from public.blissbl_categories where slug = 'mascots'), 'BLB-MAS-004', 'Papii Mascot', 'A cuddly fan favourite with an expressive, lovable design.', 30000, 'mascot-papii.jpg', 15, true, false, true),
+  ((select id from public.blissbl_categories where slug = 'mascots'), 'BLB-MAS-003', 'Domiia Mascot', 'A charming pocket-sized companion from the BLISSBL mascot collection.', 28000, 'mascot-domia.jpg', 20, true, false, false),
+  ((select id from public.blissbl_categories where slug = 'mascots'), 'BLB-MAS-004', 'Babii Mascot', 'A cuddly fan favourite with an expressive, lovable design.', 30000, 'mascot-papii.jpg', 15, true, false, true),
   ((select id from public.blissbl_categories where slug = 'mascots'), 'BLB-MAS-005', 'Permpoon Mascot', 'Limited mascot edition for a cheerful collection highlight.', 32000, 'mascot-permpoon.jpg', 10, true, true, false),
   ((select id from public.blissbl_categories where slug = 'photocards'), 'BLB-PHO-001', 'JoongDunk Photocard Set', 'A curated photocard set in a protective collectible sleeve.', 18000, 'photocard-joongdunk.jpg', 30, true, false, true),
   ((select id from public.blissbl_categories where slug = 'photocards'), 'BLB-PHO-002', 'Pond Naravit Photocard', 'Premium printed photocard for your binder or display.', 12000, 'photocard-pond-naravit.jpg', 35, true, true, false),

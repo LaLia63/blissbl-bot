@@ -6,9 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
 const products = [
-  { name: "Avocasian Mascot", price: "28,000 MMK", image: "/assets/mascot-avocasian.jpg", tag: "Best seller" },
+  { name: "Avocean Mascot", price: "28,000 MMK", image: "/assets/mascot-avocasian.jpg", tag: "Best seller" },
   { name: "Ceri Mascot", price: "28,000 MMK", image: "/assets/mascot-ceri.jpg", tag: "New" },
-  { name: "Papii Mascot", price: "30,000 MMK", image: "/assets/mascot-papii.jpg", tag: "Fan favourite" },
+  { name: "Babii Mascot", price: "30,000 MMK", image: "/assets/mascot-papii.jpg", tag: "Fan favourite" },
   { name: "Permpoon Mascot", price: "32,000 MMK", image: "/assets/mascot-permpoon.jpg", tag: "Limited" },
   { name: "JoongDunk Photocard Set", price: "18,000 MMK", image: "/assets/photocard-joongdunk.jpg", tag: "Popular" },
   { name: "Pond Naravit Photocard", price: "12,000 MMK", image: "/assets/photocard-pond-naravit.jpg", tag: "New" },
