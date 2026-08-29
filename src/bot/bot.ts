@@ -613,7 +613,7 @@ async function finishDelivery(ctx: Context, session: SessionRow, note: string): 
   const delivery = { ...session.context, delivery_note: note === "-" ? "" : note.trim() } as Record<string, string>;
   await setSession(ctx.from.id, "CONFIRM_ORDER", delivery);
   await ctx.reply(
-    `<b>Confirm delivery</b>\n\nRecipient: ${escapeHtml(delivery.recipient_name)}\nPhone: ${escapeHtml(delivery.recipient_phone)}\nAddress: ${escapeHtml(delivery.address_line)}, ${escapeHtml(delivery.township)}, ${escapeHtml(delivery.city)}\nNote: ${escapeHtml(delivery.delivery_note || "None")}`,
+    `<b>Confirm delivery</b>\n\nRecipient: ${escapeHtml(delivery.recipient_name)}\nPhone: ${escapeHtml(delivery.recipient_phone)}\nAddress: ${escapeHtml(delivery.address_line)}, ${escapeHtml(delivery.township)}, ${escapeHtml(delivery.city)}\nNote: ${escapeHtml(delivery.delivery_note || "None")}\n\nKPay payment QR will appear after you press Confirm order.`,
     {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard().text("Confirm order", "confirm_order").row().text("Cancel", "cart"),
@@ -798,7 +798,7 @@ export function getBot(): Bot {
     }
     await setSession(ctx.from.id, "CHECKOUT_FULL_NAME", {});
     await ctx.answerCallbackQuery();
-    await ctx.reply("<b>Delivery information</b>\n\nStep 1 of 7: What is your full name?", { parse_mode: "HTML" });
+    await ctx.reply("<b>Delivery information</b>\n\nPayment QR will appear after you finish these details and press Confirm order.\n\nStep 1 of 7: What is your full name?", { parse_mode: "HTML" });
   });
   bot.callbackQuery("confirm_order", async (ctx) => {
     const customer = await ensureCustomer(ctx);
